@@ -1,0 +1,185 @@
+/**
+ * @example HTTPGET.ino
+ * @brief The HTTPGET demo of library WeeESP8266. 
+ * @author Wu Pengfei<pengfei.wu@itead.cc> 
+ * @date 2015.03
+ * 
+ * @par Copyright:
+ * Copyright (c) 2015 ITEAD Intelligent Systems Co., Ltd. \n\n
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of
+ * the License, or (at your option) any later version. \n\n
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+//#define SERIAL_RX_BUFFER_SIZE 256
+//#define SERIAL_TX_BUFFER_SIZE 128
+
+#include "ESP8266.h"
+
+#define SSID        "Online LIMS"
+#define PASSWORD    "chevere42"
+
+#define HOST_NAME   "129.6.15.28"
+#define HOST_PORT    (123)                   //          (2390)
+
+SoftwareSerial ESPserial(2, 3); // RX | TX
+
+ESP8266 wifi(ESPserial);
+
+void setup(void)
+{
+    Serial.begin(9600);
+    Serial.print("setup begin\r\n");
+
+    Serial.print("FW Version:");
+    Serial.println(wifi.getVersion().c_str());
+
+    if (wifi.setOprToStationSoftAP()) Serial.print("to station + softap ok\r\n");
+    else Serial.print("to station + softap err\r\n");
+
+    // == connect to WLAN ============================
+     
+    if (wifi.joinAP(SSID, PASSWORD)) {
+        Serial.print("Join AP success\r\n");
+
+        Serial.print("IP:");
+        Serial.println( wifi.getLocalIP().c_str());       
+        } 
+    else Serial.print("Join AP failure\r\n");
+
+    // == disable MUX, only one TCP or UDP communication can be builded 
+    
+    if (wifi.disableMUX()) Serial.print("single ok\r\n");
+    else Serial.print("single err\r\n");
+    
+    Serial.println("setup end");    
+    Serial.println("===========\n\r");
+}
+
+// == main loop ============================================================
+
+void sendNTPpacket();
+
+const int NTP_PACKET_SIZE = 48;
+byte packetBuffer[ NTP_PACKET_SIZE];
+
+void loop(void)
+{
+    uint8_t buffer[128] = {0};
+
+    if (wifi.registerUDP(HOST_NAME, HOST_PORT)) Serial.print("register udp ok\r\n");
+    else Serial.print("register udp err\r\n");
+    
+    // == build NTP packet 
+
+    memset(packetBuffer, 0, NTP_PACKET_SIZE);
+    packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+    packetBuffer[1] = 0;     // Stratum, or type of clock
+    packetBuffer[2] = 6;     // Polling Interval
+    packetBuffer[3] = 0xEC;  // Peer Clock Precision
+    // 8 bytes of zero for Root Delay & Root Dispersion
+    packetBuffer[12]  = 49;
+    packetBuffer[13]  = 0x4E;
+    packetBuffer[14]  = 49;
+    packetBuffer[15]  = 52;
+
+    wifi.send( packetBuffer, NTP_PACKET_SIZE );
+    
+    uint32_t len = wifi.recv(packetBuffer, NTP_PACKET_SIZE, 10000);
+    
+    if (len > 0) {
+        
+        //the timestamp starts at byte 40 of the received packet and is four bytes,
+        // or two words, long. First, esxtract the two words:
+
+        unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+        unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+        // combine the four bytes (two words) into a long integer
+        // this is NTP time (seconds since Jan 1 1900):
+    
+        unsigned long secsSince1900 = highWord << 16 | lowWord;
+        Serial.print("Seconds since Jan 1 1900 = ");
+    
+        secsSince1900 -= 3600*3;
+    
+        Serial.println(secsSince1900);
+
+        // now convert NTP time into everyday time:
+        // Serial.print("Unix time = ");
+        // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
+    
+        const unsigned long seventyYears = 2208988800UL;
+        // subtract seventy years:
+        unsigned long epoch = secsSince1900 - seventyYears;
+        // print Unix time:
+        //Serial.println(epoch);
+
+        // print the hour, minute and second:
+        Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
+        Serial.print((epoch  % 86400L) / 3600); // print the hour (86400 equals secs per day)
+        Serial.print(':');
+        if (((epoch % 3600) / 60) < 10) {
+            // In the first 10 minutes of each hour, we'll want a leading '0'
+            Serial.print('0');
+        }
+        
+        Serial.print((epoch  % 3600) / 60);     // print the minute (3600 equals secs per minute)
+        Serial.print(':');
+        if ((epoch % 60) < 10) {
+            // In the first 10 seconds of each minute, we'll want a leading '0'
+            Serial.print('0');
+        }
+    
+        Serial.println(epoch % 60); // print the second    }
+    }
+    
+    if (wifi.unregisterUDP()) Serial.print("unregister udp ok\r\n");
+    else Serial.print("unregister udp err\r\n");
+
+    delay(10000);
+}
+
+void sendNTPpacket() 
+{
+    
+  //Serial.println("1");
+  // set all bytes in the buffer to 0
+  
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  // Initialize values needed to form NTP request
+  // (see URL above for details on the packets)
+  //Serial.println("2");
+  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+  packetBuffer[1] = 0;     // Stratum, or type of clock
+  packetBuffer[2] = 6;     // Polling Interval
+  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  // 8 bytes of zero for Root Delay & Root Dispersion
+  packetBuffer[12]  = 49;
+  packetBuffer[13]  = 0x4E;
+  packetBuffer[14]  = 49;
+  packetBuffer[15]  = 52;
+
+  //Serial.println("3");
+
+  // all NTP fields have been given values, now
+  // you can send a packet requesting a timestamp:
+//  Udp.beginPacket(address, 123); //NTP requests are to port 123
+  //Serial.println("4");
+
+  //  Serial.println( packetBuffer );
+  
+  wifi.send( packetBuffer, NTP_PACKET_SIZE );
+  
+  //Serial.println("5");
+//  Udp.endPacket();
+  //Serial.println("6");
+}
+     
